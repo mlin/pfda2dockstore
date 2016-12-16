@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+
+import argparse
+import subprocess
+import requests
+import json
+import sys
+import yaml
+
+def main():
+    parser = argparse.ArgumentParser(description='Export precisionFDA app to Dockstore', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-p','--pfda-token', metavar='XXX', type=str, help='precisionFDA auth token')
+    parser.add_argument('-v', '--verbose', action='store_true', help='verbose log to standard error')
+    parser.add_argument('tag_prefix', type=str, help="docker tag prefix")
+    parser.add_argument('app_name', type=str, help="precisionFDA app name")
+    args = parser.parse_args()
+
+    docker_tag = args.tag_prefix + args.app_name
+    # TODO: validate docker_tag
+
+    apps = resolve_pfda_app_name(args.pfda_token, args.app_name)
+    if len(apps) == 0:
+        print("Couldn't find app named " + args.app_name, file=sys.stderr)
+        sys.exit(1)
+    elif len(apps) > 1:
+        print("Unexpected: multiple apps named " + args.app_name, file=sys.stderr)
+        sys.exit(1)
+    app = apps[0]
+
+    cwl = pfda_app_to_cwl(apps[0], docker_tag)
+    with open("/tmp/Dockstore.cwl", 'w') as outfile:
+        print(yaml.dump(cwl), file=outfile)
+
+    dockerfile = pfda_export_app_dockerfile(args.pfda_token, app["uid"])
+    if not docker_build(docker_tag, dockerfile):
+        sys.exit(1)
+    docker_push(docker_tag)
+
+# app name -> [app json]
+def resolve_pfda_app_name(token, app_name):
+    list_of_apps = pfda_api(token, "/list_apps")
+    return [app for app in list_of_apps if app["name"] == app_name]
+
+def pfda_export_app_dockerfile(token, app_uid):
+    return pfda_api(token, "/export_app", {"id": app_uid})["content"]
+
+# call precisionFDA API, return JSON response body
+def pfda_api(token, path, body={}):
+    url = "https://precision.fda.gov/api" + path
+    headers = {
+        "Authorization": "Key " + token,
+        "Content-Type": "application/json"
+    }
+    response = requests.post(url, headers=headers, data=json.dumps(body))
+    if response.status_code != 200:
+        print("precisionFDA API error status {}:".format(response.status_code), file=sys.stderr)
+        print(response.json(), file=sys.stderr)
+        sys.exit(1)
+    return response.json()
+
+# generate CWL tool hash (for YAMLificiation) given the pFDA app spec and what to 'docker pull'
+def pfda_app_to_cwl(app, docker_pull):
+    cwl = {
+        "class": "CommandLineTool",
+        "id": app["name"],
+        "label": app["title"],
+        "cwlVersion": "v1.0",
+        #"description": app["readme"],
+        "baseCommand": [],
+        "requirements": [{
+            "class": "DockerRequirement",
+            "dockerPull": docker_pull
+        }]
+    }
+
+    app_spec = app["spec"]
+
+    position = 1
+    inputs = {}
+    for inp in app_spec["input_spec"]:
+        cwl_inp = {
+            "doc": inp["help"],
+            "inputBinding": {
+                "position": position,
+                "prefix": "--" + inp["name"]
+            }
+        }
+        if inp["class"] == "string":
+            cwl_inp["type"] = "string"
+        elif inp["class"] == "int":
+            cwl_inp["type"] = "long"
+        elif inp["class"] == "file":
+            cwl_inp["type"] = "File"
+        else:
+            raise Exception("Unsupported input type: {} {}".format(inp["class"], inp["name"]))
+        if "default" in inp and inp["class"] != "file":
+            cwl_inp["default"] = inp["default"]
+        inputs[inp["name"]] = cwl_inp
+        position = position + 1
+    cwl["inputs"] = inputs
+
+    outputs = {}
+    for outp in app_spec["output_spec"]:
+        cwl_outp = {
+            "doc": outp["help"]
+        }
+        if outp["class"] == "file":
+            cwl_outp["type"] = "File"
+            cwl_outp["outputBinding"] = {
+                "glob": "/data/out/{}/*".format(outp["name"])
+            }
+        else:
+            raise Exception("Unsupported output type: {} {}".format(outp["class"], outp["name"]))
+        outputs[outp["name"]] = cwl_outp
+    cwl["outputs"] = outputs
+
+    return cwl
+
+def docker_build(tag, dockerfile):
+    p = subprocess.Popen(["sudo", "docker", "build", "-t", tag, "-"], stdin=subprocess.PIPE)
+    p.communicate(dockerfile.encode('utf-8'))
+    return p.returncode == 0
+
+def docker_push(tag):
+    subprocess.check_call(["sudo", "docker", "push", tag])
+
+main()
