@@ -32,7 +32,7 @@ def main():
         print(yaml.dump(cwl), file=outfile)
 
     dockerfile = pfda_export_app_dockerfile(args.pfda_token, app["uid"])
-    dockerfile = dockerfile + "\nVOLUME /data\nVOLUME /work" # https://github.com/common-workflow-language/cwltool/issues/30 
+    dockerfile = dockerfile + "\nVOLUME /data\nVOLUME /work" # https://github.com/common-workflow-language/cwltool/issues/30
     if not docker_build(docker_tag, dockerfile):
         sys.exit(1)
     docker_push(docker_tag)
@@ -93,6 +93,10 @@ def pfda_app_to_cwl(app, docker_pull):
             cwl_inp["type"] = "long"
         elif inp["class"] == "file":
             cwl_inp["type"] = "File"
+        elif inp["class"] == "boolean":
+            cwl_inp["type"] = "boolean"
+        elif inp["class"] == "float":
+            cwl_inp["type"] = "double"
         else:
             raise Exception("Unsupported input type: {} {}".format(inp["class"], inp["name"]))
         if "default" in inp and inp["class"] != "file":
