@@ -40,8 +40,9 @@ try:
         since = datetime.now() - timedelta(days=1)
         commits = repo.get_commits(since=since)
         last = commits[0]
-        print (last)
-        repo.create_git_tag(tag, 'the tag message', last, 'commit')
+        print (last.sha)
+        # doesn't work according to this bug report!  https://github.com/PyGithub/PyGithub/issues/488
+        repo.create_git_tag(tag, 'the tag message', last.sha, 'commit')
 
-except:
-    print("errors creating repo, check to ensure this is not a duplicate")
+except e:
+    print("errors creating repo, check to ensure this is not a duplicate"+str(e))
