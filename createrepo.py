@@ -1,10 +1,14 @@
-#PyGithub
-#http://pygithub.readthedocs.io/en/latest/index.html
+#gitpython
+#http://gitpython.readthedocs.io/en/stable/tutorial.html
 
 from github import Github
+from agithub.GitHub import GitHub
+import agithub
 import os
 import argparse
 from datetime import datetime, timedelta
+import sys
+import requests
 
 parser = argparse.ArgumentParser(description='Generate github repo and upload Dockerfile/CWL')
 parser.add_argument('--token', dest='token', help='your github token')
@@ -16,6 +20,7 @@ args = parser.parse_args()
 
 #g = Github("github handle", "password") #OR
 g = Github(args.token)
+ag = GitHub(token=args.token)
 
 user = g.get_user()
 organization = g.get_organization(args.org)
@@ -40,9 +45,23 @@ try:
         since = datetime.now() - timedelta(days=1)
         commits = repo.get_commits(since=since)
         last = commits[0]
-        print (last.sha)
+        #print ("the SHA to tag: "+str(last.sha))
         # doesn't work according to this bug report!  https://github.com/PyGithub/PyGithub/issues/488
-        repo.create_git_tag(tag, 'the tag message', last.sha, 'commit')
+        #repo.create_git_tag(tag, 'the tag message', last.sha, 'commit')
+        # try a different way
+        data = {
+          "tag_name": tag,
+          "target_commitish": "master",
+          "name": tag,
+          "body": "the "+tag+" release",
+          "draft": False,
+          "prerelease": False
+        }
+        url = "https://api.github.com/repos/"+args.org+"/"+args.tool+"/releases"
+        print("the URL: "+url)
+        headers = {'Authorization': 'token '+args.token}
+        ag.repos[args.org][args.tool].releases.post(body=data)
 
-except e:
-    print("errors creating repo, check to ensure this is not a duplicate"+str(e))
+except:
+    e = sys.exc_info()[0]
+    print("errors creating repo, check to ensure this is not a duplicate: "+str(e))
